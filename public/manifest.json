@@ -1,0 +1,24 @@
+{
+  "manifest_version": 3,
+  "name": "Account Briefs for Outreach",
+  "description": "Local Salesforce workbook account briefs inside Outreach call tasks.",
+  "version": "0.1.0",
+  "permissions": ["storage"],
+  "host_permissions": ["http://localhost:8787/*"],
+  "background": {
+    "service_worker": "assets/background.js",
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://*.outreach.io/*", "https://outreach.io/*"],
+      "js": ["assets/content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Account Briefs"
+  },
+  "options_page": "options.html"
+}
