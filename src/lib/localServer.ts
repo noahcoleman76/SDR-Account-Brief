@@ -1,4 +1,10 @@
-import type { AccountBrief, MatchedAccountData, ProspectContext } from "../types/salesforce";
+import type {
+  AccountBrief,
+  AiBriefResponse,
+  MatchedAccountData,
+  ProspectContext,
+  SalesforceDataset
+} from "../types/salesforce";
 
 const SERVER_URL = "http://localhost:8787";
 
@@ -14,8 +20,9 @@ export async function checkBriefServer(): Promise<boolean> {
 
 export async function requestAiBrief(
   context: ProspectContext,
-  matchedData: MatchedAccountData
-): Promise<AccountBrief> {
+  dataset: SalesforceDataset,
+  matchedData?: MatchedAccountData
+): Promise<AiBriefResponse> {
   const response = await fetch(`${SERVER_URL}/brief`, {
     method: "POST",
     headers: {
@@ -25,6 +32,7 @@ export async function requestAiBrief(
       accountName: context.accountName,
       prospectEmail: context.prospectEmail,
       prospectName: context.prospectName,
+      dataset,
       matchedData
     })
   });
@@ -34,5 +42,29 @@ export async function requestAiBrief(
     throw new Error(message || "Local brief server returned an error.");
   }
 
-  return (await response.json()) as AccountBrief;
+  const payload = (await response.json()) as Partial<AiBriefResponse> | AccountBrief;
+  if ("brief" in payload && payload.brief) {
+    return {
+      brief: payload.brief,
+      matchedData: payload.matchedData ?? matchedData ?? {
+        opportunities: [],
+        contacts: [],
+        leads: []
+      },
+      resolvedAccountName: payload.resolvedAccountName,
+      matchReason: payload.matchReason,
+      usedWebSearch: payload.usedWebSearch,
+      webSources: payload.webSources
+    };
+  }
+
+  return {
+    brief: payload as AccountBrief,
+    matchedData: matchedData ?? {
+      opportunities: [],
+      contacts: [],
+      leads: []
+    },
+    matchReason: "Local server returned legacy brief response. Restart npm run server to enable AI matching."
+  };
 }

@@ -9,7 +9,11 @@ import { normalizeCompanyName, normalizeEmail, parseDateValue, scoreCompanyMatch
 
 function findAccountForName(accounts: AccountRecord[], accountName?: string): AccountRecord | undefined {
   const normalized = normalizeCompanyName(accountName);
-  return accounts.find((account) => normalizeCompanyName(account.accountName) === normalized);
+  const compact = normalized.replace(/\s+/g, "");
+  return accounts.find((account) => {
+    const candidate = normalizeCompanyName(account.accountName);
+    return candidate === normalized || candidate.replace(/\s+/g, "") === compact;
+  });
 }
 
 export function matchAccount(dataset: SalesforceDataset, context: ProspectContext): AccountMatch {
@@ -49,6 +53,18 @@ export function matchAccount(dataset: SalesforceDataset, context: ProspectContex
   }
 
   const detectedAccountName = context.accountName;
+  const exactAccount = findAccountForName(dataset.accounts, detectedAccountName);
+  if (exactAccount) {
+    return {
+      status: "single",
+      context,
+      account: exactAccount,
+      possibleAccounts: [exactAccount],
+      confidence: 1,
+      reason: "Matched exact normalized account name."
+    };
+  }
+
   const scored = dataset.accounts
     .map((account) => ({
       account,

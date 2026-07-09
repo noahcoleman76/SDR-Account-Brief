@@ -18,20 +18,20 @@ function productAngles(data: MatchedAccountData): string[] {
   const angles = new Set<string>();
 
   if (/ai|automation|agentic|bot|virtual agent|self service/.test(text)) {
-    angles.add("Cognigy / CXone Mpower for AI-driven service automation.");
+    angles.add("Cognigy and CXone Mpower for AI-driven service automation, virtual agents, and self-service.");
   }
   if (/contact center|call center|ccaas|cxone|agent/.test(text)) {
-    angles.add("CXone for contact center modernization and agent productivity.");
+    angles.add("CXone for cloud contact center modernization, omnichannel routing, and agent productivity.");
   }
   if (/wfm|workforce|quality|recording|analytics/.test(text)) {
-    angles.add("NICE workforce engagement, quality, and analytics for operational improvement.");
+    angles.add("NICE workforce engagement management, quality, recording, and analytics for operational improvement.");
   }
   if (/digital|chat|email|omnichannel|journey/.test(text)) {
-    angles.add("Digital engagement and journey orchestration across service channels.");
+    angles.add("NICE digital engagement and journey orchestration across chat, messaging, email, and service channels.");
   }
 
   if (angles.size === 0) {
-    angles.add("Discovery-led NICE CXone conversation around service operations, automation, and customer experience.");
+    angles.add("Discovery-led NICE conversation around CXone, Cognigy, CXone Mpower, service automation, and customer experience operations.");
   }
 
   return [...angles].slice(0, 4);
@@ -55,10 +55,20 @@ export function generateLocalBrief(data: MatchedAccountData, context: ProspectCo
       ? `There is prior opportunity history with NICE, most recently ${recentOpp.stage ?? "logged in Salesforce"}`
       : "There is no clear opportunity history in the imported workbook";
   const angle = productAngles(data)[0];
+  const sizeSignal = data.account?.employeeRange
+    ? `${accountName} is listed at ${data.account.employeeRange} employees`
+    : `${accountName} has imported account profile data`;
+  const profileSignal = [
+    data.account?.industry ? `industry: ${data.account.industry}` : undefined,
+    data.account?.website ? `website: ${data.account.website}` : undefined,
+    data.account?.estimatedSeats ? `estimated seats: ${data.account.estimatedSeats}` : undefined
+  ]
+    .filter(Boolean)
+    .join(", ");
 
   return {
-    whyCalling: `I'm calling because ${accountName} has ${interestSignal}. ${oppSignal}, so this should be framed with account context rather than treated as a completely cold call. The best angle is to connect their customer care priorities to ${angle}`,
-    openingLine: `Hi ${context.prospectName ?? matchedPerson?.name ?? "there"}, I'm calling from NICE because I noticed ${accountName} has had recent CX-related activity and I wanted to see whether improving service automation or contact center operations is on your team's radar.`,
+    whyCalling: `I'm calling because ${sizeSignal}${profileSignal ? ` (${profileSignal})` : ""}. ${oppSignal}. The best NICE angle is ${angle}`,
+    openingLine: `Hi ${context.prospectName ?? matchedPerson?.name ?? "there"}, I'm calling from NICE because ${accountName} looks like a good fit for a quick conversation around customer service operations, automation, or contact center modernization.`,
     previousConversations: data.opportunities
       .filter((opportunity) => opportunity.notes || opportunity.nextStep || opportunity.compellingEvent)
       .slice(0, 4)

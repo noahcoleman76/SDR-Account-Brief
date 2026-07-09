@@ -19,11 +19,16 @@ export function normalizeCompanyName(value?: string): string {
 
   const words = value
     .toLowerCase()
+    .replace(/\bco[\s.-]*operative\b/g, "cooperative")
     .replace(/&/g, " and ")
     .replace(/[^a-z0-9\s]/g, " ")
     .split(/\s+/)
     .filter(Boolean)
-    .filter((word) => !COMPANY_SUFFIXES.includes(word));
+    .filter((word) => word !== "the");
+
+  while (words.length > 1 && COMPANY_SUFFIXES.includes(words[words.length - 1])) {
+    words.pop();
+  }
 
   return words.join(" ").trim();
 }
@@ -64,6 +69,16 @@ export function scoreCompanyMatch(candidate: string, detected: string): number {
 
   if (left.includes(right) || right.includes(left)) {
     return 0.86;
+  }
+
+  const compactLeft = left.replace(/\s+/g, "");
+  const compactRight = right.replace(/\s+/g, "");
+  if (compactLeft === compactRight) {
+    return 0.98;
+  }
+
+  if (compactLeft.includes(compactRight) || compactRight.includes(compactLeft)) {
+    return 0.9;
   }
 
   const leftTokens = new Set(left.split(" "));

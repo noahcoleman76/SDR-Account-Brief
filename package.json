@@ -7,7 +7,9 @@
     "dev": "concurrently \"vite build --watch --mode development --config vite.config.ts\" \"vite build --watch --mode development --config vite.content.config.ts\"",
     "build": "tsc --noEmit && vite build --config vite.config.ts && vite build --config vite.content.config.ts",
     "server": "tsx server/index.ts",
-    "dev:all": "concurrently \"npm run dev\" \"npm run server\""
+    "dev:all": "concurrently \"npm run dev\" \"npm run server\"",
+    "server:startup:install": "powershell -ExecutionPolicy Bypass -File scripts/install-server-startup.ps1",
+    "server:startup:uninstall": "powershell -ExecutionPolicy Bypass -File scripts/uninstall-server-startup.ps1"
   },
   "dependencies": {
     "@vitejs/plugin-react": "^5.0.0",

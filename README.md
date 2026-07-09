@@ -15,6 +15,8 @@ The MVP stores imported data locally in browser IndexedDB. It can call a local N
 - Runs only on Outreach pages.
 - Detects visible account, prospect email, and prospect name context from the Outreach page.
 - Matches by prospect email first, then normalized/fuzzy account name.
+- When the local server is running, uses AI to choose the most likely related imported account and associated opportunities, contacts, and leads from candidate Salesforce records.
+- If the imported dataset has no useful account detail, the local server can use OpenAI web search to enrich the brief from public information.
 - Injects a right-side Account Brief panel with:
   - Why I'm Calling
   - Recommended Opening Line
@@ -71,6 +73,28 @@ The server exposes:
 - `GET http://localhost:8787/health`
 - `POST http://localhost:8787/brief`
 
+## Keep The Local Server Running
+
+On Windows, install a user-level scheduled task that starts the local server whenever you log in:
+
+```bash
+npm run server:startup:install
+```
+
+This starts `npm run server` from this project folder and keeps `http://localhost:8787` available after login.
+
+To remove the startup task:
+
+```bash
+npm run server:startup:uninstall
+```
+
+If you change `.env.local` or update server code, restart the task from Windows Task Scheduler or run:
+
+```bash
+npm run server
+```
+
 ## Build Extension
 
 ```bash
@@ -107,7 +131,8 @@ Re-importing replaces the existing local dataset. `Clear Imported Data` removes 
 2. Open an Outreach call task page.
 3. The extension checks `http://localhost:8787/health`.
 4. If the server is running, the panel requests an AI-generated brief from the local server.
-5. If the server is unavailable, the panel warns:
+5. The server first tries to resolve the best imported Salesforce account and related records. If the workbook has no useful account detail, it may use web search for public account context.
+6. If the server is unavailable, the panel warns:
 
 ```text
 Local brief server is not running.
@@ -138,6 +163,7 @@ If no account matches:
 - IndexedDB via `idb`.
 - Excel parsing via `read-excel-file`. SheetJS `xlsx` was intentionally avoided because npm reports unresolved high-severity advisories for that package.
 - Local server uses Express, CORS, dotenv, and OpenAI.
+- AI matching and web search run only in the local Node server, not in the Chrome extension source.
 - No backend is required for deterministic fallback behavior.
 - The current OpenAI integration is intentionally local-only. For a shared or production deployment, move the OpenAI request behind a secured backend and have the extension call that backend instead of handling AI generation directly.
 

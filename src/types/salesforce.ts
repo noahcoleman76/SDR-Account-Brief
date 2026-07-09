@@ -92,3 +92,12 @@ export interface MatchedAccountData {
   contacts: PersonMomentRecord[];
   leads: PersonMomentRecord[];
 }
+
+export interface AiBriefResponse {
+  brief: AccountBrief;
+  matchedData: MatchedAccountData;
+  resolvedAccountName?: string;
+  matchReason?: string;
+  usedWebSearch?: boolean;
+  webSources?: string[];
+}

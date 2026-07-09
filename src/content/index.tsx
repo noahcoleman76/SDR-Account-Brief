@@ -1,7 +1,7 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { ensureBriefDefaults, generateLocalBrief } from "../lib/brief";
-import { getDataset, getSummary } from "../lib/db";
+import { getDatasetFromExtension, getSummaryFromExtension } from "../lib/extensionData";
 import { checkBriefServer, requestAiBrief } from "../lib/localServer";
 import { collectMatchedData, matchAccount } from "../lib/matching";
 import type {
@@ -12,7 +12,7 @@ import type {
   MatchedAccountData,
   ProspectContext
 } from "../types/salesforce";
-import { detectProspectContext } from "./contextDetection";
+import { currentOutreachTaskSignature, detectProspectContext } from "./contextDetection";
 import styles from "./styles.css?inline";
 
 type ServerState = "checking" | "available" | "unavailable";
@@ -23,6 +23,7 @@ interface PanelState {
   match?: AccountMatch;
   matchedData?: MatchedAccountData;
   brief?: AccountBrief;
+  allAccounts: AccountRecord[];
   server: ServerState;
   loading: boolean;
   error?: string;
@@ -50,9 +51,15 @@ function mount() {
 
 function AccountBriefPanel() {
   const [collapsed, setCollapsed] = useState(false);
-  const [selectedAccount, setSelectedAccount] = useState<AccountRecord>();
+  const [accountSearch, setAccountSearch] = useState("");
+  const [panelPosition, setPanelPosition] = useState(() => ({
+    x: Math.max(8, window.innerWidth - 396),
+    y: 16
+  }));
+  const dragOffset = useRef<{ x: number; y: number } | null>(null);
   const [state, setState] = useState<PanelState>({
     context: {},
+    allAccounts: [],
     server: "checking",
     loading: true
   });
@@ -60,14 +67,18 @@ function AccountBriefPanel() {
   async function refresh(accountOverride?: AccountRecord) {
     setState((current) => ({ ...current, loading: true, error: undefined, server: "checking" }));
 
-    const context = detectProspectContext();
     const [summary, dataset, serverAvailable] = await Promise.all([
-      getSummary(),
-      getDataset(),
+      getSummaryFromExtension(),
+      getDatasetFromExtension(),
       checkBriefServer()
     ]);
+    const detectedContext = detectProspectContext(dataset.accounts.map((account) => account.accountName));
+    const context = {
+      ...detectedContext,
+      accountName: detectedContext.accountName ?? accountOverride?.accountName
+    };
 
-    const match = accountOverride
+    let match = accountOverride
       ? {
           status: "single" as const,
           context,
@@ -78,21 +89,34 @@ function AccountBriefPanel() {
         }
       : matchAccount(dataset, context);
 
-    const matchedData = collectMatchedData(dataset, match.account);
+    let matchedData = collectMatchedData(dataset, match.account);
     let brief: AccountBrief | undefined;
     let error: string | undefined;
 
-    if (match.account) {
-      if (serverAvailable) {
-        try {
-          brief = await requestAiBrief(context, matchedData);
-        } catch (requestError) {
-          error = requestError instanceof Error ? requestError.message : "AI brief request failed.";
+    if (serverAvailable) {
+      try {
+        const aiResponse = await requestAiBrief(context, dataset, matchedData);
+        brief = aiResponse.brief;
+        matchedData = aiResponse.matchedData;
+        if (matchedData.account) {
+          match = {
+            status: "single",
+            context,
+            account: matchedData.account,
+            matchedPerson: matchedData.matchedPerson,
+            possibleAccounts: [matchedData.account],
+            confidence: 1,
+            reason: aiResponse.matchReason ?? "AI selected the most likely imported account."
+          };
+        }
+      } catch (requestError) {
+        error = requestError instanceof Error ? requestError.message : "AI brief request failed.";
+        if (match.account) {
           brief = ensureBriefDefaults(generateLocalBrief(matchedData, context));
         }
-      } else {
-        brief = ensureBriefDefaults(generateLocalBrief(matchedData, context));
       }
+    } else if (match.account) {
+      brief = ensureBriefDefaults(generateLocalBrief(matchedData, context));
     }
 
     setState({
@@ -101,6 +125,7 @@ function AccountBriefPanel() {
       match,
       matchedData,
       brief: brief ? ensureBriefDefaults(brief) : undefined,
+      allAccounts: dataset.accounts,
       server: serverAvailable ? "available" : "unavailable",
       loading: false,
       error
@@ -109,9 +134,22 @@ function AccountBriefPanel() {
 
   useEffect(() => {
     void refresh();
-    const timer = window.setInterval(() => void refresh(selectedAccount), 120000);
+    const timer = window.setInterval(() => void refresh(), 120000);
     return () => window.clearInterval(timer);
-  }, [selectedAccount]);
+  }, []);
+
+  useEffect(() => {
+    let lastSignature = currentOutreachTaskSignature();
+    const timer = window.setInterval(() => {
+      const nextSignature = currentOutreachTaskSignature();
+      if (nextSignature && nextSignature !== lastSignature) {
+        lastSignature = nextSignature;
+        void refresh();
+      }
+    }, 1500);
+
+    return () => window.clearInterval(timer);
+  }, []);
 
   const fullBriefText = useMemo(() => {
     if (!state.brief) {
@@ -130,6 +168,67 @@ function AccountBriefPanel() {
     ].join("\n\n");
   }, [state.brief]);
 
+  const searchedAccounts = useMemo(() => {
+    const query = accountSearch.trim().toLowerCase();
+    if (!query) {
+      return state.allAccounts.slice(0, 8);
+    }
+
+    return state.allAccounts
+      .filter((account) => account.accountName.toLowerCase().includes(query))
+      .slice(0, 8);
+  }, [accountSearch, state.allAccounts]);
+
+  const serverLabel =
+    state.server === "available" ? "AI server on" : state.server === "checking" ? "Checking server" : "Local fallback";
+  const matchLabel =
+    state.match?.account?.accountName ?? state.context.accountName ?? "Waiting for account";
+
+  function clampPanelPosition(x: number, y: number) {
+    const width = Math.min(380, window.innerWidth - 16);
+    const maxX = Math.max(8, window.innerWidth - width - 8);
+    const maxY = Math.max(8, window.innerHeight - 80);
+    return {
+      x: Math.min(Math.max(8, x), maxX),
+      y: Math.min(Math.max(8, y), maxY)
+    };
+  }
+
+  function startDrag(event: React.PointerEvent<HTMLElement>) {
+    if ((event.target as HTMLElement).closest("button")) {
+      return;
+    }
+
+    const panel = event.currentTarget.closest(".brief-panel");
+    if (!panel) {
+      return;
+    }
+
+    const rect = panel.getBoundingClientRect();
+    dragOffset.current = {
+      x: event.clientX - rect.left,
+      y: event.clientY - rect.top
+    };
+    event.currentTarget.setPointerCapture(event.pointerId);
+  }
+
+  function movePanel(event: React.PointerEvent<HTMLElement>) {
+    if (!dragOffset.current) {
+      return;
+    }
+
+    setPanelPosition(
+      clampPanelPosition(event.clientX - dragOffset.current.x, event.clientY - dragOffset.current.y)
+    );
+  }
+
+  function stopDrag(event: React.PointerEvent<HTMLElement>) {
+    dragOffset.current = null;
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+  }
+
   if (collapsed) {
     return (
       <button className="brief-tab" onClick={() => setCollapsed(false)}>
@@ -139,14 +238,27 @@ function AccountBriefPanel() {
   }
 
   return (
-    <aside className="brief-panel">
-      <header className="brief-header">
-        <div>
+    <aside
+      className="brief-panel"
+      style={{
+        left: `${panelPosition.x}px`,
+        right: "auto",
+        top: `${panelPosition.y}px`
+      }}
+    >
+      <header
+        className="brief-header"
+        onPointerDown={startDrag}
+        onPointerMove={movePanel}
+        onPointerUp={stopDrag}
+        onPointerCancel={stopDrag}
+      >
+        <div className="header-copy">
           <strong>Account Brief</strong>
-          <span>{state.match?.account?.accountName ?? state.context.accountName ?? "No match yet"}</span>
+          <span>{matchLabel}</span>
         </div>
         <div className="header-actions">
-          <button title="Refresh" onClick={() => void refresh(selectedAccount)}>
+          <button title="Refresh" onClick={() => void refresh()}>
             Refresh
           </button>
           <button title="Collapse" onClick={() => setCollapsed(true)}>
@@ -155,11 +267,16 @@ function AccountBriefPanel() {
         </div>
       </header>
 
+      <section className="status-strip">
+        <span className={`server-pill server-${state.server}`}>{serverLabel}</span>
+        <span>{state.summary ? `${state.summary.accounts} accounts imported` : "No workbook"}</span>
+      </section>
+
       {state.server === "unavailable" ? (
         <div className="warning">
           <strong>Local brief server is not running.</strong>
           <p>Open a terminal and run <code>npm run server</code>.</p>
-          <button onClick={() => void refresh(selectedAccount)}>Retry</button>
+          <button onClick={() => void refresh()}>Retry</button>
           <p>Using deterministic local brief generation for now.</p>
         </div>
       ) : null}
@@ -168,11 +285,46 @@ function AccountBriefPanel() {
 
       {state.loading ? <div className="muted">Loading account context...</div> : null}
 
+      <section className="detected-context">
+        <div className="context-header">
+          <strong>Detected Context</strong>
+          {state.match?.reason ? <span>{state.match.reason}</span> : null}
+        </div>
+        <div className="context-grid">
+          <ContextField label="Account" value={state.context.accountName} />
+          <ContextField label="Prospect" value={state.context.prospectName} />
+          <ContextField label="Email" value={state.context.prospectEmail} />
+        </div>
+      </section>
+
       {!state.summary ? (
         <EmptyState message="No Salesforce workbook imported. Open extension options and import the Excel workbook." />
       ) : null}
 
       {state.match?.status === "none" ? <EmptyState message={state.match.reason ?? "No account match found."} /> : null}
+
+      {state.summary && !state.brief ? (
+        <section className="section manual-search">
+          <h2>Find Imported Account</h2>
+          <input
+            type="search"
+            placeholder="Search account name"
+            value={accountSearch}
+            onChange={(event) => setAccountSearch(event.target.value)}
+          />
+          {searchedAccounts.map((account) => (
+            <button
+              className="match-button"
+              key={account.id}
+              onClick={() => {
+                void refresh(account);
+              }}
+            >
+              {account.accountName}
+            </button>
+          ))}
+        </section>
+      ) : null}
 
       {state.match?.status === "multiple" ? (
         <section className="section">
@@ -182,7 +334,6 @@ function AccountBriefPanel() {
               className="match-button"
               key={account.id}
               onClick={() => {
-                setSelectedAccount(account);
                 void refresh(account);
               }}
             >
@@ -196,11 +347,13 @@ function AccountBriefPanel() {
         <div className="brief-content">
           <TopSection
             title="Why I'm Calling"
+            tone="primary"
             text={state.brief.whyCalling}
             copyText={state.brief.whyCalling}
           />
           <TopSection
             title="Recommended Opening Line"
+            tone="accent"
             text={state.brief.openingLine}
             copyText={state.brief.openingLine}
           />
@@ -223,9 +376,28 @@ function AccountBriefPanel() {
   );
 }
 
-function TopSection({ title, text, copyText }: { title: string; text: string; copyText: string }) {
+function ContextField({ label, value }: { label: string; value?: string }) {
   return (
-    <section className="top-section">
+    <div className="context-field">
+      <span>{label}</span>
+      <strong>{value ?? "Not found"}</strong>
+    </div>
+  );
+}
+
+function TopSection({
+  title,
+  text,
+  copyText,
+  tone = "default"
+}: {
+  title: string;
+  text: string;
+  copyText: string;
+  tone?: "default" | "primary" | "accent";
+}) {
+  return (
+    <section className={`top-section top-section-${tone}`}>
       <div className="section-title">
         <h2>{title}</h2>
         <button onClick={() => void navigator.clipboard.writeText(copyText)}>Copy</button>
