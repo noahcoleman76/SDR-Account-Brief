@@ -5,7 +5,14 @@ import type {
   ProspectContext,
   SalesforceDataset
 } from "../types/salesforce";
-import { normalizeCompanyName, normalizeEmail, parseDateValue, scoreCompanyMatch } from "./normalize";
+import {
+  isLikelyCompanyAlias,
+  normalizeCompanyName,
+  normalizeEmail,
+  normalizePersonName,
+  parseDateValue,
+  scoreCompanyMatch
+} from "./normalize";
 
 function findAccountForName(accounts: AccountRecord[], accountName?: string): AccountRecord | undefined {
   const normalized = normalizeCompanyName(accountName);
@@ -39,6 +46,27 @@ export function matchAccount(dataset: SalesforceDataset, context: ProspectContex
           reason: "Matched prospect email to imported contact/lead."
         };
       }
+    }
+  }
+
+  const prospectName = normalizePersonName(context.prospectName);
+  const matchedByName = prospectName
+    ? people.find((person) => normalizePersonName(person.name) === prospectName)
+    : undefined;
+  if (matchedByName?.accountName || matchedByName?.accountId) {
+    const account = matchedByName.accountId
+      ? dataset.accounts.find((candidate) => candidate.id === matchedByName.accountId)
+      : dataset.accounts.find((candidate) => isLikelyCompanyAlias(candidate.accountName, matchedByName.accountName));
+    if (account && isLikelyCompanyAlias(account.accountName, context.accountName ?? matchedByName.accountName)) {
+      return {
+        status: "single",
+        context,
+        account,
+        matchedPerson: matchedByName,
+        possibleAccounts: [account],
+        confidence: 0.95,
+        reason: "Matched the Outreach prospect name to an imported contact/lead and a related account alias."
+      };
     }
   }
 
@@ -107,7 +135,11 @@ export function matchAccount(dataset: SalesforceDataset, context: ProspectContex
   };
 }
 
-export function collectMatchedData(dataset: SalesforceDataset, account?: AccountRecord): MatchedAccountData {
+export function collectMatchedData(
+  dataset: SalesforceDataset,
+  account?: AccountRecord,
+  context?: ProspectContext
+): MatchedAccountData {
   if (!account) {
     return {
       opportunities: [],
@@ -117,8 +149,18 @@ export function collectMatchedData(dataset: SalesforceDataset, account?: Account
   }
 
   const accountKey = normalizeCompanyName(account.accountName);
+  const prospectName = normalizePersonName(context?.prospectName);
+  const prospectEmail = normalizeEmail(context?.prospectEmail);
+  const matchesPerson = (person: { accountName?: string; accountId?: string; name?: string; email?: string }) =>
+    Boolean(person.accountId && person.accountId === account.id) ||
+    normalizeCompanyName(person.accountName) === accountKey ||
+    isLikelyCompanyAlias(person.accountName, account.accountName) ||
+    Boolean(prospectEmail && normalizeEmail(person.email) === prospectEmail) ||
+    Boolean(prospectName && normalizePersonName(person.name) === prospectName);
   const matchesAccount = (accountName?: string, accountId?: string) =>
-    Boolean(accountId && accountId === account.id) || normalizeCompanyName(accountName) === accountKey;
+    Boolean(accountId && accountId === account.id) ||
+    normalizeCompanyName(accountName) === accountKey ||
+    isLikelyCompanyAlias(accountName, account.accountName);
 
   return {
     account,
@@ -129,7 +171,7 @@ export function collectMatchedData(dataset: SalesforceDataset, account?: Account
         const openB = b.stage && !/closed|lost|won/i.test(b.stage) ? 1 : 0;
         return openB - openA || parseDateValue(b.createdDate) - parseDateValue(a.createdDate);
       }),
-    contacts: dataset.contacts.filter((contact) => matchesAccount(contact.accountName, contact.accountId)),
-    leads: dataset.leads.filter((lead) => matchesAccount(lead.accountName, lead.accountId))
+    contacts: dataset.contacts.filter(matchesPerson),
+    leads: dataset.leads.filter(matchesPerson)
   };
 }

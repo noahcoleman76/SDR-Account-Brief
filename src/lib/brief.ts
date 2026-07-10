@@ -20,6 +20,9 @@ function productAngles(data: MatchedAccountData): string[] {
   if (/ai|automation|agentic|bot|virtual agent|self service/.test(text)) {
     angles.add("Cognigy and CXone Mpower for AI-driven service automation, virtual agents, and self-service.");
   }
+  if (/gartner|cx.trends|customer experience trends|trends.gartner/.test(text)) {
+    angles.add("Connect the prospect's NICE CX trends and Gartner research to CXone modernization and CXone Mpower priorities.");
+  }
   if (/contact center|call center|ccaas|cxone|agent/.test(text)) {
     angles.add("CXone for cloud contact center modernization, omnichannel routing, and agent productivity.");
   }

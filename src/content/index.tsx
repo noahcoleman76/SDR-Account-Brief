@@ -89,7 +89,7 @@ function AccountBriefPanel() {
         }
       : matchAccount(dataset, context);
 
-    let matchedData = collectMatchedData(dataset, match.account);
+    let matchedData = collectMatchedData(dataset, match.account, context);
     let brief: AccountBrief | undefined;
     let error: string | undefined;
 

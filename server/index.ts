@@ -4,7 +4,13 @@ import express from "express";
 import OpenAI from "openai";
 import { ensureBriefDefaults, generateLocalBrief } from "../src/lib/brief";
 import { collectMatchedData } from "../src/lib/matching";
-import { normalizeCompanyName, normalizeEmail, scoreCompanyMatch } from "../src/lib/normalize";
+import {
+  isLikelyCompanyAlias,
+  normalizeCompanyName,
+  normalizeEmail,
+  normalizePersonName,
+  scoreCompanyMatch
+} from "../src/lib/normalize";
 import type {
   AccountBrief,
   AccountRecord,
@@ -153,15 +159,19 @@ async function resolveAccountData(
   const email = normalizeEmail(context.prospectEmail);
   const people = [...dataset.contacts, ...dataset.leads];
   const exactPerson = email ? people.find((person) => normalizeEmail(person.email) === email) : undefined;
-  if (exactPerson?.accountName || exactPerson?.accountId) {
+  const prospectName = normalizePersonName(context.prospectName);
+  const identityPerson = exactPerson ?? (prospectName
+    ? people.find((person) => normalizePersonName(person.name) === prospectName)
+    : undefined);
+  if (identityPerson?.accountName || identityPerson?.accountId) {
     const exactAccount =
-      exactPerson.accountId
-        ? dataset.accounts.find((account) => account.id === exactPerson.accountId)
+      identityPerson.accountId
+        ? dataset.accounts.find((account) => account.id === identityPerson.accountId)
         : dataset.accounts.find(
-            (account) => normalizeCompanyName(account.accountName) === normalizeCompanyName(exactPerson.accountName)
+            (account) => isLikelyCompanyAlias(account.accountName, identityPerson.accountName)
           );
-    if (exactAccount) {
-      return { ...collectMatchedData(dataset, exactAccount), matchedPerson: exactPerson };
+    if (exactAccount && isLikelyCompanyAlias(exactAccount.accountName, context.accountName ?? identityPerson.accountName)) {
+      return { ...collectMatchedData(dataset, exactAccount, context), matchedPerson: identityPerson };
     }
   }
 
@@ -172,18 +182,18 @@ async function resolveAccountData(
 
   const exactNameMatch = candidates.find((candidate) => isSameCompany(candidate.account.accountName, context.accountName));
   if (exactNameMatch) {
-    return collectMatchedData(dataset, exactNameMatch.account);
+    return collectMatchedData(dataset, exactNameMatch.account, context);
   }
 
   const obvious = candidates[0];
   if (obvious.score >= 0.92) {
-    return collectMatchedData(dataset, obvious.account);
+    return collectMatchedData(dataset, obvious.account, context);
   }
 
   const selectedAccountId = await selectAccountWithAi(client, context, candidates);
   const selected = candidates.find((candidate) => candidate.account.id === selectedAccountId);
 
-  return selected ? collectMatchedData(dataset, selected.account) : emptyMatchedData();
+  return selected ? collectMatchedData(dataset, selected.account, context) : emptyMatchedData();
 }
 
 function buildCandidateBundles(dataset: SalesforceDataset, context: ProspectContext): CandidateBundle[] {
@@ -328,7 +338,7 @@ async function generateAiBrief(
         role: "user",
         content: JSON.stringify({
           instruction:
-            "Create an account brief with: whyCalling, openingLine, previousConversations, opportunityHistory, recentInterestingMoments, knownContactsLeads, accountProfile, suggestedAngles, nextBestAction. whyCalling should be 2-3 plain sentences beginning with \"I'm calling because\". It must include company size/employee range when available, any relevant technology or CX signal, and one practical NICE angle. Make the opening line use the actual Outreach prospectName only; do not use any other person name from page or workbook unless it is the detected prospect.",
+            "Create an account brief with: whyCalling, openingLine, previousConversations, opportunityHistory, recentInterestingMoments, knownContactsLeads, accountProfile, suggestedAngles, nextBestAction. whyCalling should be 2-3 plain sentences beginning with \"I'm calling because\". It must include company size/employee range when available, any relevant technology or CX signal, and one practical NICE angle. Translate marketing form identifiers into readable intent signals. For example, a NICE Gartner CX trends checklist form fill means the prospect researched Gartner/CX trends content and provides a specific opener around CXone or CXone Mpower; include that signal in whyCalling, recentInterestingMoments, suggestedAngles, and nextBestAction when present. Make the opening line use the actual Outreach prospectName only; do not use any other person name from page or workbook unless it is the detected prospect.",
           niceProductContext: NICE_PRODUCT_CONTEXT,
           context,
           matchedData

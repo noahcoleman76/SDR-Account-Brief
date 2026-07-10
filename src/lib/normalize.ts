@@ -37,6 +37,30 @@ export function normalizeEmail(value?: string): string {
   return value?.trim().toLowerCase() ?? "";
 }
 
+export function normalizePersonName(value?: string): string {
+  return value
+    ?.toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ")
+    .split(/\s+/)
+    .filter(Boolean)
+    .join(" ") ?? "";
+}
+
+export function isLikelyCompanyAlias(left?: string, right?: string): boolean {
+  const normalizedLeft = normalizeCompanyName(left);
+  const normalizedRight = normalizeCompanyName(right);
+  if (!normalizedLeft || !normalizedRight) return false;
+  if (normalizedLeft === normalizedRight) return true;
+
+  const leftTokens = normalizedLeft.split(" ");
+  const rightTokens = normalizedRight.split(" ");
+  const shorter = leftTokens.length <= rightTokens.length ? leftTokens : rightTokens;
+  const longer = leftTokens.length <= rightTokens.length ? rightTokens : leftTokens;
+
+  // Supports brand variants such as TELUS, TELUS Digital, and TELUS International.
+  return shorter.length > 0 && shorter.every((token) => longer.includes(token));
+}
+
 export function compact(value?: unknown): string | undefined {
   if (value === undefined || value === null) {
     return undefined;
